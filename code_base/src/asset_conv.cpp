@@ -8,13 +8,16 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace gif643 {
@@ -22,8 +25,6 @@ namespace gif643 {
 const size_t    BPP         = 4;    // Bytes per pixel
 const float     ORG_WIDTH   = 48.0; // Original SVG image width in px.
 int             NUM_THREADS = std::thread::hardware_concurrency(); 
-
-std::mutex mut_;
 
 
 using PNGDataVec = std::vector<char>;
@@ -109,6 +110,11 @@ struct TaskDef
     std::string fname_in;
     std::string fname_out; 
     int size;
+
+    std::tuple<const std::string&, int> get_hash_key()
+    {
+        return std::tuple{fname_in, size};
+    }
 };
 
 /// \brief A class representing the processing of one SVG file to a PNG stream.
@@ -119,6 +125,7 @@ class TaskRunner
 {
 private:
     TaskDef task_def_;
+    PNGDataPtr pngData;
 
 public:
     TaskRunner(const TaskDef& task_def):
@@ -144,10 +151,12 @@ public:
         NSVGimage*          image_in        = nullptr;
         NSVGrasterizer*     rast            = nullptr;
 
-        try {
+        try
+        {
             // Read the file ...
             image_in = nsvgParseFromFile(fname_in.c_str(), "px", 0);
-            if (image_in == nullptr) {
+            if (image_in == nullptr)
+            {
                 std::string msg = "Cannot parse '" + fname_in + "'.";
                 throw std::runtime_error(msg.c_str());
             }
@@ -171,10 +180,11 @@ public:
 
             // Write it out ...
             std::ofstream file_out(fname_out, std::ofstream::binary);
-            auto data = writer.getData();
-            file_out.write(&(data->front()), data->size());
-            
-        } catch (std::runtime_error e) {
+            pngData = writer.getData();
+            file_out.write(&(pngData->front()), pngData->size());
+        }
+        catch (std::runtime_error e)
+        {
             std::cerr << "Exception while processing "
                       << fname_in
                       << ": "
@@ -191,6 +201,20 @@ public:
                   << fname_in 
                   << "." 
                   << std::endl;
+    }
+
+    PNGDataPtr getData()
+    {
+        return pngData;
+    }
+};
+
+struct KeyHasher : public std::unary_function<std::tuple<std::string, int>, std::size_t>
+{
+    size_t operator()(const std::tuple<std::string, int>& key) const
+    {
+        const std::string& s = std::get<std::string>(key);
+        return std::hash<std::string>{}(s) ^ std::get<int>(key);
     }
 };
 
@@ -215,14 +239,16 @@ private:
     // The tasks to run queue (FIFO).
     std::queue<TaskDef> task_queue_;
 
-    // The cache hash map (TODO). Note that we use the string definition as the // key.
-    using PNGHashMap = std::unordered_map<std::string, PNGDataPtr>;
+    using PNGHashMap = std::unordered_map<std::tuple<const std::string, int>, PNGDataPtr, KeyHasher>;
     PNGHashMap png_cache_;
 
     bool should_run_;           // Used to signal the end of the processor to
                                 // threads.
 
     std::vector<std::thread> queue_threads_;
+
+    std::mutex queueMutex;
+    std::mutex hashMutex;
 
 public:
     /// \brief Default constructor.
@@ -318,9 +344,9 @@ public:
         if (parse(line_org, def)) {
             std::cerr << "Queueing task '" << line_org << "'." << std::endl;
 
-            mut_.lock();
+            queueMutex.lock();            
             task_queue_.push(def);
-            mut_.unlock();
+            queueMutex.unlock();
         }
     }
 
@@ -335,18 +361,42 @@ private:
     void processQueue()
     {
         while (should_run_) {
-            mut_.lock();
-            if (!task_queue_.empty()) {
-                std::cout << "Accessing " << std::endl;
+            queueMutex.lock();
+            if (!task_queue_.empty())
+            {
                 TaskDef task_def = task_queue_.front();
                 task_queue_.pop();
                 
-                mut_.unlock();
-                TaskRunner runner(task_def);
-                runner();
+                queueMutex.unlock();
+
+                hashMutex.lock();
+                auto hashKey = task_def.get_hash_key();
+                auto dataIterator = png_cache_.find(hashKey);
+                if (dataIterator == png_cache_.end())
+                {
+                    std::cout << "Need to compute" << std::endl;
+                    TaskRunner runner(task_def);
+                    runner();
+                       
+                    PNGDataPtr pngData = runner.getData();
+                    png_cache_.emplace(hashKey, pngData);
+                    hashMutex.unlock();
+                }
+                else
+                {
+                    hashMutex.unlock();
+                    std::cout << "No need to compute" << std::endl;
+                    
+                    // Write it out ...
+                    std::ofstream file_out(task_def.fname_out, std::ofstream::binary);
+                    PNGDataPtr pngData = std::get<PNGDataPtr>(*dataIterator);
+                    file_out.write(&(pngData->front()), pngData->size());
+                }
             }
             else
-                mut_.unlock();
+            {
+                queueMutex.unlock();
+            }
         }
     }
 };
