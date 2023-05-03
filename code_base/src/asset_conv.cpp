@@ -111,7 +111,7 @@ struct TaskDef
     std::string fname_out; 
     int size;
 
-    std::tuple<const std::string&, int> get_hash_key()
+    std::tuple<const std::string, int> get_hash_key()
     {
         return std::tuple{fname_in, size};
     }
@@ -291,34 +291,34 @@ public:
     {
         std::string line = line_org;
         std::vector<std::string> tokens;
-            size_t pos;
-            while ((pos = line.find(";")) != std::string::npos) {
-                tokens.push_back(line.substr(0, pos));
-                line.erase(0, pos + 1);
-            }
-            tokens.push_back(line);
+        size_t pos;
+        while ((pos = line.find(";")) != std::string::npos) {
+            tokens.push_back(line.substr(0, pos));
+            line.erase(0, pos + 1);
+        }
+        tokens.push_back(line);
 
-            if (tokens.size() < 3) {
-                std::cerr << "Error: Wrong line format: "
-                        << line_org
-                        << " (size: " << line_org.size() << ")."
-                        << std::endl;
-                return false;
-            }
+        if (tokens.size() < 3) {
+            std::cerr << "Error: Wrong line format: "
+                    << line_org
+                    << " (size: " << line_org.size() << ")."
+                    << std::endl;
+            return false;
+        }
 
-            const std::string& fname_in     = tokens[0];
-            const std::string& fname_out    = tokens[1];
-            const std::string& width_str    = tokens[2]; 
+        const std::string& fname_in     = tokens[0];
+        const std::string& fname_out    = tokens[1];
+        const std::string& width_str    = tokens[2]; 
 
-            int width = std::atoi(width_str.c_str());
+        int width = std::atoi(width_str.c_str());
 
-            def = {
-                fname_in,
-                fname_out,
-                width
-            };
+        def = {
+            fname_in,
+            fname_out,
+            width
+        };
 
-            return true;
+        return true;
     }
 
     /// \brief Tries to parse the given task definition and run it.
@@ -342,9 +342,9 @@ public:
     {
         TaskDef def;
         if (parse(line_org, def)) {
-            std::cerr << "Queueing task '" << line_org << "'." << std::endl;
+            std::cout << "Queueing task '" << line_org << "'." << std::endl;
 
-            queueMutex.lock();            
+            queueMutex.lock();
             task_queue_.push(def);
             queueMutex.unlock();
         }
@@ -360,43 +360,60 @@ private:
     /// \brief Queue processing thread function.
     void processQueue()
     {
-        while (should_run_) {
-            queueMutex.lock();
-            if (!task_queue_.empty())
+        try
+        {
+            while (should_run_)
             {
-                TaskDef task_def = task_queue_.front();
-                task_queue_.pop();
-                
-                queueMutex.unlock();
-
-                hashMutex.lock();
-                auto hashKey = task_def.get_hash_key();
-                auto dataIterator = png_cache_.find(hashKey);
-                if (dataIterator == png_cache_.end())
+                queueMutex.lock();
+                if (!task_queue_.empty())
                 {
-                    std::cout << "Need to compute" << std::endl;
-                    TaskRunner runner(task_def);
-                    runner();
-                       
-                    PNGDataPtr pngData = runner.getData();
-                    png_cache_.emplace(hashKey, pngData);
-                    hashMutex.unlock();
+                    TaskDef task_def = task_queue_.front();
+                    task_queue_.pop();
+                    queueMutex.unlock();
+
+                    hashMutex.lock();
+                    auto hashKey = task_def.get_hash_key();
+                    auto dataIterator = png_cache_.find(hashKey);
+                    if (dataIterator == png_cache_.end() || !std::get<PNGDataPtr>(*dataIterator))
+                    {
+                        png_cache_.emplace(hashKey, PNGDataPtr{});
+                        hashMutex.unlock();
+                        
+                        TaskRunner runner(task_def);
+                        runner();
+                           
+                        PNGDataPtr pngData = runner.getData();
+                        hashMutex.lock();
+                        std::cout << "inserting " << task_def.fname_out << std::endl;
+                        png_cache_[hashKey] = pngData;
+                        hashMutex.unlock();
+                    }
+                    else
+                    {
+                        std::cout << "No need to compute" << std::endl;
+
+                        std::cout << "getting for " << task_def.fname_out << std::endl;
+                        PNGDataPtr pngData = std::get<PNGDataPtr>(*dataIterator);
+                        
+                        // Write it out ...
+                        std::ofstream file_out(task_def.fname_out, std::ofstream::binary);
+                        
+                        std::cout << "got" << std::endl;
+                        hashMutex.unlock();
+                        file_out.write(&(pngData->front()), pngData->size());
+                        std::cout << "file written" << std::endl;
+                    }
                 }
                 else
                 {
-                    hashMutex.unlock();
-                    std::cout << "No need to compute" << std::endl;
-                    
-                    // Write it out ...
-                    std::ofstream file_out(task_def.fname_out, std::ofstream::binary);
-                    PNGDataPtr pngData = std::get<PNGDataPtr>(*dataIterator);
-                    file_out.write(&(pngData->front()), pngData->size());
+                    queueMutex.unlock();
                 }
             }
-            else
-            {
-                queueMutex.unlock();
-            }
+            std::cout << "exiting thread" << std::endl;
+        }
+        catch(const std::exception& e)
+        {
+            std::cout << "AAAAA FUCK FUCK FUCK " << e.what() << std::this_thread::get_id()  << std::endl;
         }
     }
 };
@@ -430,7 +447,7 @@ int main(int argc, char** argv)
     for (const auto & entry : std::filesystem::directory_iterator(path))
     {
         std::string filename = entry.path();
-        std::string line = filename + ';' + std::string{filename.begin() + 5, filename.end() - 4} + ".png;480";
+        std::string line = filename + ';' + std::string{filename.begin() + 5, filename.end() - 4} + ".png;360";
         std::cout << line << std::endl;
         lines.emplace_back(line);
     }
@@ -446,7 +463,12 @@ int main(int argc, char** argv)
         {
             proc.parseAndQueue(line);
         }
-
+        for(const std::string& line : lines)
+        {
+            proc.parseAndQueue(line);
+        }
+        
+        std::cout << "all threads exited" << std::endl;
         if (file_in.is_open())
         {
             file_in.close();
