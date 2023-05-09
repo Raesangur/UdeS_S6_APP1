@@ -127,9 +127,91 @@ Matrix doH(const Matrix& mtx)
     return newMtx;
 }
 
-void doE(Matrix& mtx)
+Matrix doE(const Matrix& mtx)
 {
+    Matrix newMtx{100, std::vector<std::vector<std::array<double, 3>>>{100, std::vector<std::array<double, 3>>{100,}}};
     
+    auto thread1 = [](Matrix& newMtx, const Matrix& mtx){
+        for(int i = 0; i < MATRIX_SIZE; i++)
+        {
+            for(int j = 0; j < MATRIX_SIZE - 1; j++)
+            {
+                for(int k = 0; k < MATRIX_SIZE; k++)
+                {
+                    newMtx[i][j][k][0] += mtx[i][j + 1][k][2] - mtx[i][j][k][2];
+                }
+            }
+        }
+
+        for(int i = 0; i < MATRIX_SIZE; i++)
+        {
+            for(int j = 0; j < MATRIX_SIZE; j++)
+            {
+                for(int k = 0; k < MATRIX_SIZE - 1; k++)
+                {
+                    newMtx[i][j][k][0] -= mtx[i][j][k + 1][1] - mtx[i][j][k][1];
+                }
+            }
+        }
+    };
+
+    auto thread2 = [](Matrix& newMtx, const Matrix& mtx){
+        for(int i = 0; i < MATRIX_SIZE; i++)
+        {
+            for(int j = 0; j < MATRIX_SIZE; j++)
+            {
+                for(int k = 0; k < MATRIX_SIZE - 1; k++)
+                {
+                    newMtx[i][j][k][1] += mtx[i][j][k + 1][0] - mtx[i][j][k][0];
+                }
+            }
+        }
+
+        for(int i = 0; i < MATRIX_SIZE - 1; i++)
+        {
+            for(int j = 0; j < MATRIX_SIZE; j++)
+            {
+                for(int k = 0; k < MATRIX_SIZE; k++)
+                {
+                    newMtx[i][j][k][1] -= mtx[i + 1][j][k][2] - mtx[i][j][k][2];
+                }
+            }
+        }
+    };
+
+
+    auto thread3 = [](Matrix& newMtx, const Matrix& mtx){
+        for(int i = 0; i < MATRIX_SIZE - 1; i++)
+        {
+            for(int j = 0; j < MATRIX_SIZE; j++)
+            {
+                for(int k = 0; k < MATRIX_SIZE; k++)
+                {
+                    newMtx[i][j][k][2] += mtx[i + 1][j][k][1] - mtx[i][j][k][1];
+                }
+            }
+        }
+
+        for(int i = 0; i < MATRIX_SIZE; i++)
+        {
+            for(int j = 0; j < MATRIX_SIZE - 1; j++)
+            {
+                for(int k = 0; k < MATRIX_SIZE; k++)
+                {
+                    newMtx[i][j][k][2] -= mtx[i][j + 1][k][0] - mtx[i][j][k][0];
+                }
+            }
+        }
+    };
+
+    std::thread t1 {thread1, std::ref(newMtx), mtx};
+    std::thread t2 {thread2, std::ref(newMtx), mtx};
+    thread3(newMtx, mtx);
+
+    t1.join();
+    t2.join();
+
+    return newMtx;
 }
 
 void read_matrix(Matrix& mtx, const double* ptr)
@@ -217,23 +299,21 @@ int main(int argc, char** argv)
         {
             // On attend le signal du parent.
             std::cerr << "CPP: Starting work." << std::endl;
-            wait_signal();
 
+            wait_signal();
             read_matrix(m, mtx);
-            // On fait le travail.
-            
-            
-            //do the thing
-            Matrix newM = doH(m);
-            write_matrix(newM, mtx);
-            
-            //ack_signal();
-            //wait_signal();
-            //doE(mtx);
+            Matrix newH = doH(m);
+            write_matrix(newH, mtx);
+            ack_signal();
+
+            wait_signal();
+            read_matrix(m, mtx);
+            Matrix newE = doE(m);
+            write_matrix(newE, mtx);
+            ack_signal();
             
             // On signale que le travail est terminé.
             std::cerr << "CPP: Work done." << std::endl;
-            ack_signal();
         }
 
         munmap(shm_mmap, BUFFER_SIZE);

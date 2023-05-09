@@ -58,7 +58,7 @@ def curl_H(H):
 def timestep(E, H, courant_number, source_pos, source_val):
     E += courant_number * curl_H_true(H)
     E[source_pos] += source_val
-    H -= courant_number * curl_E(E)
+    H -= courant_number * curl_E_true(E)
     return E, H
 
 
