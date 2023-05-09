@@ -312,6 +312,7 @@ int main(int argc, char** argv)
             write_matrix(newE, mtx);
             ack_signal();
             
+            
             // On signale que le travail est terminé.
             std::cerr << "CPP: Work done." << std::endl;
         }
