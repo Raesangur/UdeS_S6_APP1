@@ -19,6 +19,9 @@
 #include <thread>
 
 // Taille de la matrice de travail (un côté)
+constexpr size_t E = 0;
+constexpr size_t H = 1;
+
 static const int MATRIX_SIZE = 100;
 static const int BUFFER_SIZE = MATRIX_SIZE * MATRIX_SIZE * MATRIX_SIZE * 3 * sizeof(double);
 // Tampon générique à utiliser pour créer le fichier
@@ -40,21 +43,42 @@ void ack_signal()
     std::cout << "" << std::endl;
 }
 
-Matrix doH(const Matrix& mtx)
+
+template<size_t isH>
+Matrix curl(const Matrix& mtx)
 {
     Matrix newMtx{100, std::vector<std::vector<std::array<double, 3>>>{100, std::vector<std::array<double, 3>>{100,}}};
     
     auto thread1 = [](Matrix& newMtx, const Matrix& mtx){
-        for(int i = 0; i < MATRIX_SIZE; i++)
-        {
-            for(int j = 0; j < MATRIX_SIZE - 1; j++)
+        auto threadA = [](Matrix& newMtx, const Matrix& mtx) {
+            for(int i = 0; i < MATRIX_SIZE / 2 - 1; i++)
             {
-                for(int k = 0; k < MATRIX_SIZE; k++)
+                for(int j = 0; j < MATRIX_SIZE - 1; j++)
                 {
-                    newMtx[i][j + 1][k][0] += mtx[i][j + 1][k][2] - mtx[i][j][k][2];
+                    for(int k = 0; k < MATRIX_SIZE; k++)
+                    {
+                        newMtx[i][j + isH][k][0] += mtx[i][j + 1][k][2] - mtx[i][j][k][2];
+                    }
                 }
             }
-        }
+        };
+        auto threadB = [](Matrix& newMtx, const Matrix& mtx) {
+            for(int i = MATRIX_SIZE / 2; i < MATRIX_SIZE; i++)
+            {
+                for(int j = 0; j < MATRIX_SIZE - 1; j++)
+                {
+                    for(int k = 0; k < MATRIX_SIZE; k++)
+                    {
+                        newMtx[i][j + isH][k][0] += mtx[i][j + 1][k][2] - mtx[i][j][k][2];
+                    }
+                }
+            }
+        };
+
+        std::thread ta {threadA, std::ref(newMtx), mtx};
+        threadB(newMtx, mtx);
+        ta.join();
+
 
         for(int i = 0; i < MATRIX_SIZE; i++)
         {
@@ -62,7 +86,7 @@ Matrix doH(const Matrix& mtx)
             {
                 for(int k = 0; k < MATRIX_SIZE - 1; k++)
                 {
-                    newMtx[i][j][k + 1][0] -= mtx[i][j][k + 1][1] - mtx[i][j][k][1];
+                    newMtx[i][j][k + isH][0] -= mtx[i][j][k + 1][1] - mtx[i][j][k][1];
                 }
             }
         }
@@ -75,7 +99,7 @@ Matrix doH(const Matrix& mtx)
             {
                 for(int k = 0; k < MATRIX_SIZE - 1; k++)
                 {
-                    newMtx[i][j][k + 1][1] += mtx[i][j][k + 1][0] - mtx[i][j][k][0];
+                    newMtx[i][j][k + isH][1] += mtx[i][j][k + 1][0] - mtx[i][j][k][0];
                 }
             }
         }
@@ -86,7 +110,7 @@ Matrix doH(const Matrix& mtx)
             {
                 for(int k = 0; k < MATRIX_SIZE; k++)
                 {
-                    newMtx[i + 1][j][k][1] -= mtx[i + 1][j][k][2] - mtx[i][j][k][2];
+                    newMtx[i + isH][j][k][1] -= mtx[i + 1][j][k][2] - mtx[i][j][k][2];
                 }
             }
         }
@@ -100,7 +124,7 @@ Matrix doH(const Matrix& mtx)
             {
                 for(int k = 0; k < MATRIX_SIZE; k++)
                 {
-                    newMtx[i + 1][j][k][2] += mtx[i + 1][j][k][1] - mtx[i][j][k][1];
+                    newMtx[i + isH][j][k][2] += mtx[i + 1][j][k][1] - mtx[i][j][k][1];
                 }
             }
         }
@@ -111,94 +135,7 @@ Matrix doH(const Matrix& mtx)
             {
                 for(int k = 0; k < MATRIX_SIZE; k++)
                 {
-                    newMtx[i][j + 1][k][2] -= mtx[i][j + 1][k][0] - mtx[i][j][k][0];
-                }
-            }
-        }
-    };
-
-    std::thread t1 {thread1, std::ref(newMtx), mtx};
-    std::thread t2 {thread2, std::ref(newMtx), mtx};
-    thread3(newMtx, mtx);
-
-    t1.join();
-    t2.join();
-
-    return newMtx;
-}
-
-Matrix doE(const Matrix& mtx)
-{
-    Matrix newMtx{100, std::vector<std::vector<std::array<double, 3>>>{100, std::vector<std::array<double, 3>>{100,}}};
-    
-    auto thread1 = [](Matrix& newMtx, const Matrix& mtx){
-        for(int i = 0; i < MATRIX_SIZE; i++)
-        {
-            for(int j = 0; j < MATRIX_SIZE - 1; j++)
-            {
-                for(int k = 0; k < MATRIX_SIZE; k++)
-                {
-                    newMtx[i][j][k][0] += mtx[i][j + 1][k][2] - mtx[i][j][k][2];
-                }
-            }
-        }
-
-        for(int i = 0; i < MATRIX_SIZE; i++)
-        {
-            for(int j = 0; j < MATRIX_SIZE; j++)
-            {
-                for(int k = 0; k < MATRIX_SIZE - 1; k++)
-                {
-                    newMtx[i][j][k][0] -= mtx[i][j][k + 1][1] - mtx[i][j][k][1];
-                }
-            }
-        }
-    };
-
-    auto thread2 = [](Matrix& newMtx, const Matrix& mtx){
-        for(int i = 0; i < MATRIX_SIZE; i++)
-        {
-            for(int j = 0; j < MATRIX_SIZE; j++)
-            {
-                for(int k = 0; k < MATRIX_SIZE - 1; k++)
-                {
-                    newMtx[i][j][k][1] += mtx[i][j][k + 1][0] - mtx[i][j][k][0];
-                }
-            }
-        }
-
-        for(int i = 0; i < MATRIX_SIZE - 1; i++)
-        {
-            for(int j = 0; j < MATRIX_SIZE; j++)
-            {
-                for(int k = 0; k < MATRIX_SIZE; k++)
-                {
-                    newMtx[i][j][k][1] -= mtx[i + 1][j][k][2] - mtx[i][j][k][2];
-                }
-            }
-        }
-    };
-
-
-    auto thread3 = [](Matrix& newMtx, const Matrix& mtx){
-        for(int i = 0; i < MATRIX_SIZE - 1; i++)
-        {
-            for(int j = 0; j < MATRIX_SIZE; j++)
-            {
-                for(int k = 0; k < MATRIX_SIZE; k++)
-                {
-                    newMtx[i][j][k][2] += mtx[i + 1][j][k][1] - mtx[i][j][k][1];
-                }
-            }
-        }
-
-        for(int i = 0; i < MATRIX_SIZE; i++)
-        {
-            for(int j = 0; j < MATRIX_SIZE - 1; j++)
-            {
-                for(int k = 0; k < MATRIX_SIZE; k++)
-                {
-                    newMtx[i][j][k][2] -= mtx[i][j + 1][k][0] - mtx[i][j][k][0];
+                    newMtx[i][j + isH][k][2] -= mtx[i][j + 1][k][0] - mtx[i][j][k][0];
                 }
             }
         }
@@ -302,13 +239,13 @@ int main(int argc, char** argv)
 
             wait_signal();
             read_matrix(m, mtx);
-            Matrix newH = doH(m);
+            Matrix newH = curl<H>(m);
             write_matrix(newH, mtx);
             ack_signal();
 
             wait_signal();
             read_matrix(m, mtx);
-            Matrix newE = doE(m);
+            Matrix newE = curl<E>(m);
             write_matrix(newE, mtx);
             ack_signal();
             
