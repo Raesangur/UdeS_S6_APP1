@@ -68,7 +68,7 @@ Matrix doH(const Matrix& mtx)
         }
     };
 
-    //auto thread2 = [newMtx, mtx]() mutable {
+    auto thread2 = [](Matrix& newMtx, const Matrix& mtx){
         for(int i = 0; i < MATRIX_SIZE; i++)
         {
             for(int j = 0; j < MATRIX_SIZE; j++)
@@ -90,10 +90,10 @@ Matrix doH(const Matrix& mtx)
                 }
             }
         }
-    //};
+    };
 
 
-    //auto thread3 = [newMtx, mtx]() mutable {
+    auto thread3 = [](Matrix& newMtx, const Matrix& mtx){
         for(int i = 0; i < MATRIX_SIZE - 1; i++)
         {
             for(int j = 0; j < MATRIX_SIZE; j++)
@@ -115,16 +115,14 @@ Matrix doH(const Matrix& mtx)
                 }
             }
         }
-    //};
+    };
 
     std::thread t1 {thread1, std::ref(newMtx), mtx};
-    //std::thread t2 {thread2};
-    //thread1();
-    //thread2();
-    //thread3();
+    std::thread t2 {thread2, std::ref(newMtx), mtx};
+    thread3(newMtx, mtx);
 
     t1.join();
-    //t2.join();
+    t2.join();
 
     return newMtx;
 }
