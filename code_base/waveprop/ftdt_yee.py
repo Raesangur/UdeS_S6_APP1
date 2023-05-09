@@ -1,6 +1,33 @@
 # GPL3, Copyright (c) Max Hofheinz, UdeS, 2021
 
 import numpy, fiddle
+from subprocess import Popen, PIPE
+import mmap
+import time
+
+def subp():
+    subproc = Popen(["./lab_ex4", FNAME], stdin=PIPE, stdout=PIPE)
+    return subproc
+
+def signal_and_wait(subproc):
+    subproc.stdin.write("START\n".encode())
+    subproc.stdin.flush()                   # Nécessaire pour vider le tampon de sortie
+    res = subproc.stdout.readline()
+    #print(res)
+
+FNAME       = "sus-file"
+
+def curl_E_true(E):
+    matrix = numpy.ndarray(shape=E.shape, dtype=numpy.float64, buffer=shm_mm)
+    matrix[:] = E
+    signal_and_wait(subproc)
+    return matrix
+
+def curl_H_true(H):
+    matrix = numpy.ndarray(shape=H.shape, dtype=numpy.float64, buffer=shm_mm)
+    matrix[:] = H
+    signal_and_wait(subproc)
+    return matrix
 
 def curl_E(E):
     curl_E = numpy.zeros(E.shape)
@@ -29,7 +56,7 @@ def curl_H(H):
 
 
 def timestep(E, H, courant_number, source_pos, source_val):
-    E += courant_number * curl_H(H)
+    E += courant_number * curl_H_true(H)
     E[source_pos] += source_val
     H -= courant_number * curl_E(E)
     return E, H
@@ -76,8 +103,12 @@ if __name__ == "__main__":
     def source(index):
         return ([n // 3], [n // 3], [n // 2],[0]), 0.1*numpy.sin(0.1 * index)
 
-
+    subproc = subp()
+    signal_and_wait(subproc)
+    shm_f = open(FNAME, "r+b")
+    shm_mm = mmap.mmap(shm_f.fileno(), 0)
+    
     w = WaveEquation((n, n, n), 0.1, source)
     fiddle.fiddle(w, [('field component',{'Ex':0,'Ey':1,'Ez':2, 'Hx':3,'Hy':4,'Hz':5}),('slice',{'XY':2,'YZ':0,'XZ':1}),('slice index',0,n-1,n//2,1)], update_interval=0.01)
-
-
+    subproc.kill()
+    shm_mm.close()
