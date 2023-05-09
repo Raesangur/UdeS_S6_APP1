@@ -117,6 +117,32 @@ struct TaskDef
     }
 };
 
+void write_to_file(std::string fname, PNGDataPtr pngData, std::mutex& fileMutex, std::mutex* hashMutex = nullptr)
+{
+    fileMutex.lock();
+    
+    int id = 0;
+    auto dotPosition = fname.find_last_of('.');
+    std::string old_fname = fname;
+    
+    while (std::filesystem::exists(fname))
+    {
+        fname = old_fname;
+        fname.insert(dotPosition, "-" + std::to_string(++id));
+        std::cout << "Filename found, using " << fname << " instead" << std::endl;
+    }
+    
+    // Write it out ...
+    std::ofstream file_out(fname, std::ofstream::binary);
+    file_out.flush();
+    
+    fileMutex.unlock();
+    if(hashMutex)
+        hashMutex->unlock();
+    
+    file_out.write(&(pngData->front()), pngData->size());
+}
+
 /// \brief A class representing the processing of one SVG file to a PNG stream.
 ///
 /// Not thread safe !
@@ -125,18 +151,19 @@ class TaskRunner
 {
 private:
     TaskDef task_def_;
+    std::mutex& fileMutex_;
     PNGDataPtr pngData;
 
 public:
-    TaskRunner(const TaskDef& task_def):
-        task_def_(task_def)
+    TaskRunner(const TaskDef& task_def, std::mutex& fileMutex):
+        task_def_(task_def), fileMutex_(fileMutex)
     {
     }
 
     void operator()()
     {
         const std::string&  fname_in    = task_def_.fname_in;
-        const std::string&  fname_out   = task_def_.fname_out;
+        std::string         fname_out   = task_def_.fname_out;
         const size_t&       width       = task_def_.size; 
         const size_t&       height      = task_def_.size; 
         const size_t        stride      = width * BPP;
@@ -177,11 +204,9 @@ public:
             // Compress it ...
             PNGWriter writer;
             writer(width, height, BPP, &image_data[0], stride);
-
-            // Write it out ...
-            std::ofstream file_out(fname_out, std::ofstream::binary);
             pngData = writer.getData();
-            file_out.write(&(pngData->front()), pngData->size());
+
+            write_to_file(fname_out, pngData, fileMutex_);            
         }
         catch (std::runtime_error e)
         {
@@ -249,6 +274,7 @@ private:
 
     std::mutex queueMutex;
     std::mutex hashMutex;
+    std::mutex fileMutex;
 
 public:
     /// \brief Default constructor.
@@ -306,9 +332,9 @@ public:
             return false;
         }
 
-        const std::string& fname_in     = tokens[0];
-        const std::string& fname_out    = tokens[1];
-        const std::string& width_str    = tokens[2]; 
+        const std::string& fname_in  = tokens[0];
+        const std::string& fname_out = tokens[1];
+        const std::string& width_str = tokens[2];
 
         int width = std::atoi(width_str.c_str());
 
@@ -329,7 +355,7 @@ public:
     {
         TaskDef def;
         if (parse(line_org, def)) {
-            TaskRunner runner(def);
+            TaskRunner runner(def, fileMutex);
             runner();
         }
     }
@@ -360,60 +386,42 @@ private:
     /// \brief Queue processing thread function.
     void processQueue()
     {
-        try
+        while (should_run_)
         {
-            while (should_run_)
+            queueMutex.lock();
+            if (!task_queue_.empty())
             {
-                queueMutex.lock();
-                if (!task_queue_.empty())
+                TaskDef task_def = task_queue_.front();
+                task_queue_.pop();
+                queueMutex.unlock();
+
+                hashMutex.lock();
+                auto hashKey = task_def.get_hash_key();
+                auto dataIterator = png_cache_.find(hashKey);
+                if (dataIterator == png_cache_.end() || !std::get<PNGDataPtr>(*dataIterator))
                 {
-                    TaskDef task_def = task_queue_.front();
-                    task_queue_.pop();
-                    queueMutex.unlock();
-
+                    png_cache_.emplace(hashKey, PNGDataPtr{});
+                    hashMutex.unlock();
+                    
+                    TaskRunner runner(task_def, fileMutex);
+                    runner();
+                       
+                    PNGDataPtr pngData = runner.getData();
                     hashMutex.lock();
-                    auto hashKey = task_def.get_hash_key();
-                    auto dataIterator = png_cache_.find(hashKey);
-                    if (dataIterator == png_cache_.end() || !std::get<PNGDataPtr>(*dataIterator))
-                    {
-                        png_cache_.emplace(hashKey, PNGDataPtr{});
-                        hashMutex.unlock();
-                        
-                        TaskRunner runner(task_def);
-                        runner();
-                           
-                        PNGDataPtr pngData = runner.getData();
-                        hashMutex.lock();
-                        std::cout << "inserting " << task_def.fname_out << std::endl;
-                        png_cache_[hashKey] = pngData;
-                        hashMutex.unlock();
-                    }
-                    else
-                    {
-                        std::cout << "No need to compute" << std::endl;
-
-                        std::cout << "getting for " << task_def.fname_out << std::endl;
-                        PNGDataPtr pngData = std::get<PNGDataPtr>(*dataIterator);
-                        
-                        // Write it out ...
-                        std::ofstream file_out(task_def.fname_out, std::ofstream::binary);
-                        
-                        std::cout << "got" << std::endl;
-                        hashMutex.unlock();
-                        file_out.write(&(pngData->front()), pngData->size());
-                        std::cout << "file written" << std::endl;
-                    }
+                    png_cache_[hashKey] = pngData;
+                    hashMutex.unlock();
                 }
                 else
                 {
-                    queueMutex.unlock();
+                    PNGDataPtr pngData = std::get<PNGDataPtr>(*dataIterator);
+
+                    write_to_file(task_def.fname_out, pngData, fileMutex, &hashMutex);
                 }
             }
-            std::cout << "exiting thread" << std::endl;
-        }
-        catch(const std::exception& e)
-        {
-            std::cout << "AAAAA FUCK FUCK FUCK " << e.what() << std::this_thread::get_id()  << std::endl;
+            else
+            {
+                queueMutex.unlock();
+            }
         }
     }
 };
@@ -426,20 +434,41 @@ int main(int argc, char** argv)
 
     std::ifstream file_in;
 
-    if (argc >= 2 && (strcmp(argv[1], "-") != 0)) {
+    if (argc >= 2 && (strcmp(argv[1], "-") != 0))
+    {
         file_in.open(argv[1]);
-        if (file_in.is_open()) {
+        if (file_in.is_open())
+        {
             std::cin.rdbuf(file_in.rdbuf());
             std::cerr << "Using " << argv[1] << "..." << std::endl;
-        } else {
+        }
+        else
+        {
             std::cerr   << "Error: Cannot open '"
                         << argv[1] 
                         << "', using stdin (press CTRL-D for EOF)." 
                         << std::endl;
         }
-    } else {
+    }
+    else
+    {
         std::cerr << "Using stdin (press CTRL-D for EOF)." << std::endl;
     }
+    
+    int nThreads = NUM_THREADS;
+    if (argc == 3)
+    {
+        try
+        {
+            nThreads = std::stoi(argv[2]);
+            std::cout << "Using " << nThreads << " as thread count" << std::endl;
+        }
+        catch(const std::exception& e)
+        {
+            std::cout << "Cannot use " << argv[2] << " as thread count:\n" << e.what() << std::endl;
+        }
+    }
+
 
     std::vector<std::string> lines;
 
@@ -457,7 +486,7 @@ int main(int argc, char** argv)
         Benchmark b;
         
         // TODO: change the number of threads from args.
-        Processor proc;
+        Processor proc{nThreads};
 
         for(const std::string& line : lines)
         {
@@ -468,7 +497,6 @@ int main(int argc, char** argv)
             proc.parseAndQueue(line);
         }
         
-        std::cout << "all threads exited" << std::endl;
         if (file_in.is_open())
         {
             file_in.close();
