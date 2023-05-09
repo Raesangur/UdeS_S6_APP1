@@ -472,6 +472,9 @@ int main(int argc, char** argv)
 
     std::vector<std::string> lines;
 
+    Benchmark b;
+    Processor proc{nThreads};
+#if 0
     std::string path = "data";
     for (const auto & entry : std::filesystem::directory_iterator(path))
     {
@@ -481,28 +484,29 @@ int main(int argc, char** argv)
         lines.emplace_back(line);
     }
 
-    for(int i = 0; i < 1; i++)
+    for(const std::string& line : lines)
     {
-        Benchmark b;
-        
-        // TODO: change the number of threads from args.
-        Processor proc{nThreads};
-
-        for(const std::string& line : lines)
-        {
-            proc.parseAndQueue(line);
-        }
-        for(const std::string& line : lines)
-        {
-            proc.parseAndQueue(line);
-        }
-        
-        if (file_in.is_open())
-        {
-            file_in.close();
-        }
-    
-        // Wait until the processor queue's has tasks to do.
-        while (!proc.queueEmpty()) {};
+        proc.parseAndQueue(line);
     }
+        
+#else
+    while (!std::cin.eof())
+    {
+        std::string line, line_org;
+
+        std::getline(std::cin, line);
+        if (!line.empty())
+        {
+            proc.parseAndQueue(line);
+        }
+    }
+#endif
+
+    if (file_in.is_open())
+    {
+        file_in.close();
+    }
+
+    // Wait until the processor queue's has tasks to do.
+    while (!proc.queueEmpty()) {};
 }
