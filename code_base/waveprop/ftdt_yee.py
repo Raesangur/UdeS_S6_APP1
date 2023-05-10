@@ -56,8 +56,15 @@ def curl_H(H):
 
 
 def timestep(E, H, courant_number, source_pos, source_val):
-    E += courant_number * curl_H_true(H)
-    E[source_pos] += source_val
+    true_E = E + courant_number * curl_H_true(H)
+    E         += courant_number * curl_H(H)
+
+    true_E[source_pos] += source_val
+    E[source_pos]      += source_val
+
+    if numpy.allclose(true_E, E) != True:
+        print("Regular and multiprocess results have deviated")
+
     H -= courant_number * curl_E_true(E)
     return E, H
 

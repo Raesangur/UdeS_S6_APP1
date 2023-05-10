@@ -1,0 +1,1 @@
+/usr/lib/ccache/c++ -g -rdynamic CMakeFiles/lab_ex2.dir/src/lab_ex2.cpp.o -o lab_ex2  -lpthread 

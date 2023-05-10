@@ -1,0 +1,9 @@
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/nanosvg.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/stb_image.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/asset_conv.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/lab_ex1.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/lab_ex2.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/lab_ex3.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/lab_ex4.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/edit_cache.dir
+/mnt/e/GitHub/UdeS_S6_APP1/code_base/build/CMakeFiles/rebuild_cache.dir
